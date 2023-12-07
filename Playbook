@@ -1,0 +1,837 @@
+Setting up the ansible configuration file: 
+ansible.cfg ----------
+[defaults]
+inventory = ./inventory
+remote_user = [identify the user]
+ask_pass = false
+role_path = /ansible/roles/apache
+
+[privilege_escalation]
+become = true
+become_method = sudo
+become_user = root
+become_ask_pass = false
+
+>> inventory file
+[data1]
+hostname/ip
+
+[data2]
+hostname/ip
+
+[data-center:children]
+data1
+data2
+
+
+Ad hoc command syntax:
+>> ansible host-pattern -m module [-a 'module arguments'] [-i inventory]
+eg: ansible host1 -m command -a "/usr/bin/hostname" 
+
+>> ansible-doc [module-name] ---- gives info about a module
+eg: ansible-doc copy
+
+>> ansible all -m command -a /usr/bin/hostname -o 
+the -o option display the output.
+
+>> ansible all -m command -a "id" -u ansible --- list the ids of the user ansible
+
+>> Executing a Dry Run
+abible-playbook -C playbook.yml
+ 
+>> ansible-doc -l ---------- to list defaults modules
+
+MODULE 2: LAB
+
+---
+- name: Enable internet services
+  hosts: serverb.lab.example.com
+  become: yes
+  tasks: 
+     - name: latest version of all required packages installed
+	   ansible.builtin.dnf: 
+	     name: 
+		    - firewalld
+			- httpd
+			- mariadb-serverb
+			- php
+			- php-mysqlnd
+		 state: latest	
+		
+	 - name: Firewall is enabled and running
+	   service: 
+	        name: firewalld
+			state: started
+			enabled: true
+			
+	 - name: Allow firewalld access
+	   ansible.posix.firewalld: 
+	        service: http
+			state: enabled 
+			immediate: yes
+			permanent: true
+			
+      - name: httpd enabled and running 
+	    ansible.builtin.service: 
+		   name: httpd
+		   state: started
+		   enabled: true
+		   
+	  - name: mariadb enabled and running
+	    ansible.builtin.service: 
+		   name: mariadb
+		   state: started
+		   enabled: true
+		   
+	  - name: web content
+	    ansible.builtin.copy: 
+		   src: index.php
+		   dest: /var/www/html/index.php
+           mode: 0644	
+
+- name: Enable internet services
+  hosts: workstation
+  become: no #no privilege_escalation
+  tasks: 
+     - name: connect to internet
+	   ansible.builtin.uri:
+	     url: http://serverb.lab.example.com
+		 status_code: 200 
+
+Run: ansible-playbook internet.yml --syntax-check
+Module 3: LAB
+cd data-review 
+---
+- name: install and configure webserver with basic auth
+  hosts: webserver
+  vars:
+    firewall_pkg: firewalld
+    firewall_svc: firewalld
+    web_pkg: httpd
+    web_svc: httpd
+    ssl_pkg: mod_ssl
+    httpdconf_src: files/httpd.conf
+    httpdconf_dest: /etc/httpd/conf/httpd.conf
+    htaccess_src: files/.htaccess
+    secrets_dir: /etc/httpd/secrets
+    secrets_src: files/htpasswd
+    secrets_dest: "{{ secrets_dir }}/htpasswd"
+    web_root: /var/www/html
+	
+  tasks: 
+     - name: install the following pkg
+       yum: 
+	     name: 
+       	   - "{{ firewall_pkg }}"
+           - "{{ web_pkg }}"
+		   - "{{ ssl_pkg }}"
+		 state: latest   
+		 
+	  - name: configure web service
+        copy:
+          src: "{{ httpdconf_src }}"
+          dest: "{{ httpdconf_dest }}"
+          owner: root
+          group: root
+          mode: 0644
+	   
+	   - name: secrets directory exists ##making a directory
+         file:
+           path: "{{ secrets_dir }}"
+           state: directory
+           owner: apache
+           group: apache
+           mode: 0500
+			 
+		- name: htpasswd file exists
+          copy:
+            src: "{{ secrets_src }}"
+            dest: "{{ secrets_dest }}"
+            owner: apache
+            group: apache
+            mode: 0400
+		
+    - name: .htaccess file installed in docroot
+      copy:
+        src: "{{ htaccess_src }}"
+        dest: "{{ web_root }}/.htaccess"
+        owner: apache
+        group: apache
+        mode: 0400
+		
+	 - name: create index.html
+       copy:
+        content: "{{ ansible_facts['fqdn'] }} ({{ ansible_facts['default_ipv4']['address'] }}) has been customized by Ansible.\n"
+        dest: "{{ web_root }}/index.html"
+		
+	 - name: firewall service enabled and started
+       service: #ansible.builtin.service
+        name: "{{ firewall_svc }}"
+        state: started
+        enabled: true
+		
+	- name: open the port for the web server
+      ansible.posix.firewalld:
+        service: https
+        state: enabled
+        immediate: true
+        permanent: true
+		
+    - name: web service enabled and started
+      service:
+        name: "{{ web_svc }}"
+        state: started
+        enabled: true		
+		
+#play 2:	
+- name: test web server with basic auth
+  hosts: localhost
+  become: no
+  vars:
+   web_user: guest  
+  vars_files: #variable file
+    - vars/secret.yml
+  tasks: 	
+     - name: connect to web server with basic auth
+       ansible.builtin.uri:
+        url: https://serverb.lab.example.com
+        validate_certs: no
+        force_basic_auth: yes
+        user: "{{ web_user }}"
+        password: "{{ web_pass }}"
+        return_content: yes
+        status_code: 200
+      register: auth_test
+
+    - ansible.builtin.debug: #debug module adding a registered variable
+        var: auth_test.content
+		
+##make a directory vars	
+> mkdir vars
+> ansible-vault create vars/secret.yml
+web_pass: redhat
+
+Run>>
+> ansible-playbook --syntax-check --ask-vault-pass playbook.yml
+note: --ask-vault-pass prompts the vault password.
+
+> ansible-playbook --ask-vault-pass playbook.yml
+
+
+Module 4 LAB:
+TASK CONTROL
+vi vars.yml
+ packages:
+  - httpd
+  - firewalld
+  - apache 
+ services:
+   - httpd
+   - firewalld
+   - apache
+
+cd ~/control-review 
+---
+- name: 
+  hosts:
+  vars_files: vars.yml #the vars.yml contains some variable
+  tasks:
+    #Fail Fast Message
+    - name: Show Failed System Requirements Message
+      fail:
+        msg: "The {{ inventory_hostname }} did not meet minimum reqs."
+      when: >
+        ansible_memtotal_mb < min_ram_mb or
+        ansible_distribution != "RedHat"
+
+
+	#Install all Packages
+    - name: Ensure required packages are present
+      yum:
+        name: "{{ packages }}" 
+        state: latest
+		
+		
+	#Enable and start services
+    - name: Ensure services are started and enabled
+      service:
+        name: "{{ item }}" ##"the item keyword is used to loop through the name of the services"
+        state: started
+        enabled: yes
+      loop: "{{ services }}" # a variable named services with values	
+	  
+	 #Block of config tasks
+    - name: Setting up the SSL cert directory and config files
+      block:
+        - name: Create SSL cert directory
+          file:
+            path: "{{ ssl_cert_dir }}"
+            state: directory
+
+        - name: Copy Config Files
+          copy:
+            src: "{{ item.src }}"
+            dest: "{{ item.dest }}"
+          loop: "{{ web_config_files }}"
+          notify: restart web service
+
+      rescue:
+        - name: Configuration Error Message
+          debug:
+            msg: >
+              One or more of the configuration
+              changes failed, but the web service
+              is still active. 
+			  
+			  
+	 #Configure the firewall
+    - name: ensure web server ports are open
+      firewalld:
+        service: "{{ item }}"
+        immediate: true
+        permanent: true
+        state: enabled
+      loop:
+        - http
+        - https		  
+		
+		
+	#Add handlers
+  handlers:
+    - name: restart web service
+      service:
+        name: "{{ web_service }}"
+        state: restarted	
+		
+ >> to verify the web server: curl -k -vvv https://serverb.lab.example.com
+ 
+
+ MODULE 5: LAB
+ 
+2. ansible serverb.lab.example.com -m setup --- get facts about a managed host
+
+3. vim motd.j2
+System total memory: {{ ansible_facts['memtotal_mb'] }} MiB.
+System processor count: {{ ansible_facts['processor_count'] }}
+ 
+4.
+---
+- name: Configure system
+  hosts: all
+  remote_user: devops
+  become: true
+  tasks:
+    - name: Configure a custom /etc/motd
+      template:
+        src: motd.j2
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Check file exists
+      stat: #gather info about a file or directory#
+        path: /etc/motd
+      register: motd #the results are registered(saved) in "motd" variable#
+
+    - name: Display stat results
+      debug:
+        var: motd
+
+    - name: Copy custom /etc/issue file
+      copy:
+        src: files/issue
+        dest: /etc/issue
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Ensure /etc/issue.net is a symlink to /etc/issue
+      file:
+        src: /etc/issue
+        dest: /etc/issue.net
+        state: link
+        owner: root
+        group: root
+        force: yes
+		
+
+MODULE 6: LAB
+playbook.yml 
+>> mkdir tasks/web_tasks.yml [the first three content will be placed in]
+cd tasks
+touch web_tasks.yml
+
+TO replace the three tasks in playbook.yml file:
+
+ - name: Import the web_tasks.yml task file
+   import_tasks: tasks/web_tasks.yml
+      
+mkdir tasks/firewall_tasks.yml [ the remaining three content will be pasted]
+
+TO replace the three tasks in playbook.yml file: 
+
+ - name: Import the firewall_tasks.yml task file
+   import_tasks: tasks/firewall_tasks.yml
+ 
+>> playbook.yml:
+---
+- name: Install httpd
+  yum:
+    name: httpd
+    state: latest
+
+- name: Enable and start httpd
+  service:
+    name: httpd
+    enabled: true
+    state: started
+
+- name: Tuning configuration installed
+  copy:
+    src: files/tune.conf
+    dest: /etc/httpd/conf.d/tune.conf
+    owner: root
+    group: root
+    mode: 0644
+  notify:
+    - restart httpd
+___________________________________________________________________________________________________________
+
+Replace the yum and service tasks in tasks/web_tasks.yml content:
+---
+- name: Install and start httpd
+  import_tasks: install_and_enable.yml
+  vars:
+    package: httpd
+    service: httpd
+
+>> tasks/firewall_tasks.yml 
+- name: Install firewalld
+  yum:
+    name: firewalld
+    state: latest
+
+- name: Enable and start the firewall
+  service:
+    name: firewalld
+    enabled: true
+    state: started
+
+- name: Open the port for http
+  firewalld:
+    service: http
+    immediate: true
+    permanent: true
+    state: enabled
+____________________________________________________________________________________________________________________________________________________________________
+ new content:
+---
+- name: Install and start firewalld
+  import_tasks: install_and_enable.yml
+  vars:
+    package: firewalld
+    service: firewalld
+	
+>>  tasks/install_and_enable.yml
+i.e replace the httpd to package and httpd in the service as service
+- name: Install httpd {{ package }}
+  yum:
+    name: "{{ package }}"
+    state: latest
+
+- name: Enable and start httpd {{ service }}
+  service:
+    name: "{{ service }}"
+    enabled: true
+    state: started
+   
+>> playbook.yml content: #final playbook 
+---
+- name: Install and configure web service
+  hosts: server*.lab.example.com
+
+  tasks:
+    - name: Import the web_tasks.yml task file
+      import_tasks: tasks/web_tasks.yml
+
+    - name: Import the firewall_tasks.yml task file
+      import_tasks: tasks/firewall_tasks.yml
+
+  handlers:
+    - name: restart httpd
+      service:
+        name: httpd
+        state: restarted   
+
+
+MODULE 7: LAB Roles 
+
+NB: ansible-galaxy init [role-name]
+cd ~/role-review
+
+vim web_dev_server.yml
+---
+- name: Configure Dev Web Server
+  hosts: dev_webserver
+  force_handlers: yes
+  
+> mkdir -v roles
+> vi roles/requirements.yml: 
+- name: infra.apache
+  src: git@workstation.lab.example.com:infra/apache
+  scm: git
+  version: v1.4
+  
+next: install the project dependencies on the role-review directory:
+#ansible-galaxy install -r roles/requirements.yml -p roles
+
+- install RHEL system roles:
+#sudo yum install rhel-system-roles
+
+create a role skeleton:
+# cd roles
+# ansible-galaxy init apache.developer_configs
+# cd role-review
+
+- update the roles/apache.developer_configs/meta/main.yml of the apache.developer_configs role
+
+dependencies:
+  - name: infra.apache
+    src: git@workstation.lab.example.com:infra/apache
+    scm: git
+    version: v1.4
+
+- overwrite the tasks/main.yml with the developer_tasks.yml
+# mv -v developer_tasks.yml roles/apache.developer_configs/tasks/main.yml
+
+- place the developer.conf.j2 file in the role's templates 
+# mv -v developer.conf.j2 roles/apache.developer_configs/templates/
+
+vim web_developers.yml
+---
+web_developers:
+ - username: ffrank
+   name: fred frank
+   user_port: 9081
+ - username: ffrank2
+   name: freddie frank
+   user_port: 9082
+ 
+[role-review]$ mkdir -pv group_vars/dev_webserver 
+# mv -v web_developers.yml group_vars/dev_webserver
+
+- add the roles: apache.developer_configs to the play web_dev_server.yml
+vim web_dev_server.yml 
+---
+- name: Configure Dev Web Server
+  hosts: dev_webserver
+  force_handlers: yes
+  roles: 
+   - apache.developer_configs  
+  pre_tasks:
+    - name: Check SELinux configuration
+      block:
+        - include_role:
+            name: redhat.rhel_system_roles.selinux
+      rescue:
+        # Fail if failed for a different reason than selinux_reboot_required.
+        - name: Check for general failure
+          fail:
+            msg: "SELinux role failed."
+          when: not selinux_reboot_required
+
+        - name: Restart managed host
+          reboot:
+            msg: "Ansible rebooting system for updates."
+
+        - name: Reapply SELinux role to complete changes
+          include_role:
+            name: redhat.rhel_system_roles.selinux	  
+
+
+[role-review] curl servera
+[role-review] curl servera:9081
+[role-review] curl servera:9082
+
+
+MODULE 8: LAB
+Trouble-shooting
+
+
+- replace remote_user with "devops"
+- ansible-playbook secure-web.yml -vvv
+- ansible all -u devops -b -m command -a "systemctl status httpd"
+
+
+MODULE 9: LAB
+
+cd ~/system-review
+vim repo_playbook.yml
+---
+- name: Repository Configuration
+  hosts: webservers
+  tasks:
+    - name: Ensure Example Repo exists
+      yum_repository:
+        name: example-internal
+        description: Example Inc. Internal YUM repo
+        file: example
+        baseurl: http://materials.example.com/yum/repository/
+        gpgcheck: yes
+
+    - name: Ensure Repo RPM Key is Installed
+      rpm_key:
+        key: http://materials.example.com/yum/repository/RPM-GPG-KEY-example
+        state: present		
+   
+    - name: Install Example motd package
+      yum:
+        name: example-motd
+        state: present
+		
+# mkdir vars
+# vi vars/users_vars.yml
+---
+users:
+  - username: ops1
+    groups: webadmin
+  - username: ops2
+    groups: webadmin
+	
+
+vim users.yml
+---
+- name: Create multiple local users
+  hosts: webservers
+  vars_files:
+    - vars/users_vars.yml
+  tasks:
+    - name: Add webadmin group
+      group:
+        name: webadmin
+        state: present
+  
+  - name: Create user accounts
+    user:
+        name: "{{ item.username }}"/ "{{ item['username'] }}"
+        groups: webadmin
+    loop: "{{ users }}"  
+
+
+vi storage.yml: #contains variables
+
+---
+
+partitions:
+  - number: 1
+    start: 1MiB
+    end: 257MiB
+
+volume_groups:
+  - name: apache-vg
+    devices: /dev/vdb1
+
+logical_volumes:
+  - name: content-lv
+    size: 64M
+    vgroup: apache-vg
+    mount_path: /var/www
+
+  - name: logs-lv
+    size: 128M
+    vgroup: apache-vg
+    mount_path: /var/log/httpd
+	
+Change the storage.yml:
+
+   - name: Correct partitions exist on /dev/vdb
+     parted:
+      device: /dev/vdb
+      state: present
+      number: "{{ item.number }}"
+      part_start: "{{ item.start }}"
+      part_end: "{{ item.end }}"
+     loop: "{{ partitions }}"
+	  
+   - name: Ensure Volume Groups Exist
+     lvg:
+      vg: "{{ item.name }}"
+      pvs: "{{ item.devices }}"
+     loop: "{{  volume_groups }}"
+	  
+	  
+	- name: Create each Logical Volume (LV) if needed
+      lvol:
+        vg: "{{ item.vgroup }}"
+        lv: "{{ item.name }}"
+        size: "{{ item.size }}"
+      loop: "{{ logical_volumes }}"
+	  
+	  #format the logical volume as xfs#
+	- name: Ensure XFS Filesystem exists on each LV
+      filesystem:
+        dev: "/dev/{{ item.vgroup }}/{{ item.name }}"
+        fstype: xfs
+      loop: "{{ logical_volumes }}"
+	  
+	  #to resize the filesystem size
+    - name: Ensure the correct capacity for each LV
+      lvol:
+        vg: "{{ item.vgroup }}"
+        lv: "{{ item.name }}"
+        size: "{{ item.size }}"
+        resizefs: yes
+        force: yes
+      loop: "{{ logical_volumes }}"
+	  
+	  #mount the logical volume#
+	- name: Each Logical Volume is mounted
+      mount:
+        path: "{{ item.mount_path }}"
+        src: "/dev/{{ item.vgroup }}/{{ item.name }}"
+        fstype: xfs
+        state: mounted
+      loop: "{{ logical_volumes }}"
+
+
+- vim create_crontab_file.yml
+---
+- name: Recurring cron job
+  hosts: webservers
+  become: true
+  tasks:
+   - name: Crontab file exists
+     cron:
+      name: Add date and time to a file
+      minute: "*/2"
+      hour: 9-16
+      weekday: 1-5
+      user: devops
+      job: df >> /home/devops/disk_usage
+      cron_file: disk_usage
+      state: present
+
+
+#the linux-system-roles.network#
+ansible-galaxy list --- to list system roles
+
+vim  network_playbook.yml
+---
+- name: NIC Configuration
+  hosts: webservers
+  roles:
+   - rhel-system-roles.network
+
+RUN: ansible-playbook network_playbook.yml to configure the network roles
+	
+	
+- mkdir -pv group_vars/webservers --- make a subdirectory
+
+- vim group_vars/webservers/network.yml
+---
+network_connections:
+ - name: eth1
+   type: ethernet
+   ip:
+     address:
+      - 172.25.250.40/24
+		
+to verify the eth1:
+- ansible webservers -m setup -a 'filter=ansible_eth1'
+
+
+LAB 10: 
+vi ftpclients.yml
+---
+- name: Ensure FTP Client Configuration
+  hosts: ftpclients
+
+  tasks:
+    - name: latest version of lftp is installed
+      yum:
+        name: lftp
+        state: latest
+		
+#custom templates
+> mkdir -v templates
+> mv -v jinja2.j2 templates/
+
+
+> mkdir -v vars
+> mv -v defaults-template.yml vars/
+
+> cd vars
+> vi vars.yml
+vsftpd_pkg: httpd
+vsftpd_service: service
+vsftpd_configfile: /etc/httpd/conf
+
+
+> vi ansible-vsftpd.yml
+---
+- name: FTP server is installed
+  hosts:
+    - ftpservers
+  vars_files:
+    - vars/defaults-template.yml
+    - vars/vars.yml
+
+  tasks:
+    - name: Packages are installed
+      yum:
+        name: "{{ vsftpd_package }}"
+        state: present
+
+    - name: Ensure service is started
+      service:
+        name: "{{ vsftpd_service }}"
+        state: started
+        enabled: true
+
+    - name: Configuration file is installed
+      template:
+        src: templates/vsftpd.conf.j2
+        dest: "{{ vsftpd_config_file }}"
+        owner: root
+        group: root
+        mode: 0600
+        setype: etc_t
+      notify: restart vsftpd
+
+    - name: firewalld is installed
+      yum:
+        name: firewalld
+        state: present
+
+    - name: firewalld is started and enabled
+      service:
+        name: firewalld
+        state: started
+        enabled: yes
+
+    - name: FTP port is open
+      firewalld:
+        service: ftp
+        permanent: true
+        state: enabled
+        immediate: yes
+
+    - name: FTP passive data ports are open
+      firewalld:
+        port: 21000-21020/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+  handlers:
+    - name: restart vsftpd
+      service:
+        name: "{{ vsftpd_service }}"
+        state: restarted
+		
+vi site.yml #a playbook that runs other playbook
+---
+- import_playbook: ansible-vsftpd.yml
+
+- import_playbook: ftpclients.yml 
