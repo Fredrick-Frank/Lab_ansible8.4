@@ -85,18 +85,18 @@ MODULE 2: LAB
 		   
 	  - name: web content
 	    ansible.builtin.copy: 
-		   src: index.php
-		   dest: /var/www/html/index.php
-           mode: 0644	
+	     src: index.php
+	     dest: /var/www/html/index.php
+             mode: 0644	
 
 - name: Enable internet services
   hosts: workstation
   become: no #no privilege_escalation
   tasks: 
      - name: connect to internet
-	   ansible.builtin.uri:
-	     url: http://serverb.lab.example.com
-		 status_code: 200 
+       ansible.builtin.uri:
+       url: http://serverb.lab.example.com
+       status_code: 200 
 
 Run: ansible-playbook internet.yml --syntax-check
 Module 3: LAB
@@ -121,11 +121,11 @@ cd data-review
   tasks: 
      - name: install the following pkg
        yum: 
-	     name: 
-       	   - "{{ firewall_pkg }}"
-           - "{{ web_pkg }}"
-		   - "{{ ssl_pkg }}"
-		 state: latest   
+        name: 
+       	 - "{{ firewall_pkg }}"
+         - "{{ web_pkg }}"
+         - "{{ ssl_pkg }}"
+        state: latest   
 		 
 	  - name: configure web service
         copy:
@@ -136,12 +136,12 @@ cd data-review
           mode: 0644
 	   
 	   - name: secrets directory exists ##making a directory
-         file:
-           path: "{{ secrets_dir }}"
-           state: directory
-           owner: apache
-           group: apache
-           mode: 0500
+             file:
+              path: "{{ secrets_dir }}"
+              state: directory
+              owner: apache
+              group: apache
+              mode: 0500
 			 
 		- name: htpasswd file exists
           copy:
@@ -294,8 +294,6 @@ cd ~/control-review
       loop:
         - http
         - https		  
-		
-		
 	#Add handlers
   handlers:
     - name: restart web service
