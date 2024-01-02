@@ -49,20 +49,20 @@ MODULE 2: LAB
   become: yes
   tasks: 
      - name: latest version of all required packages installed
-	   ansible.builtin.dnf: 
-	     name: 
-		    - firewalld
-			- httpd
-			- mariadb-serverb
-			- php
-			- php-mysqlnd
-		 state: latest	
+       ansible.builtin.dnf: 
+	name: 
+	 - firewalld
+	 - httpd
+	 - mariadb-serverb
+	 - php
+	 - php-mysqlnd
+	state: latest	
 		
 	 - name: Firewall is enabled and running
 	   service: 
-	        name: firewalld
-			state: started
-			enabled: true
+	    name: firewalld
+	    state: started
+	    enabled: true
 			
 	 - name: Allow firewalld access
 	   ansible.posix.firewalld: 
